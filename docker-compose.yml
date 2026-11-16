@@ -1,0 +1,80 @@
+services:
+  cloudpulse-api:
+    build: ./backend
+    container_name: cloudpulse-api
+    ports: ["8000:8000"]
+    environment:
+      CLOUDPULSE_DB: /data/cloudpulse.db
+      CLOUDPULSE_ROLE: api
+      CORS_ORIGINS: http://localhost:3000
+      CLOUDPULSE_QUEUE_BACKEND: ${CLOUDPULSE_QUEUE_BACKEND:-sqlite}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+      AWS_SQS_QUEUE_URL: ${AWS_SQS_QUEUE_URL:-}
+      AWS_SQS_DLQ_URL: ${AWS_SQS_DLQ_URL:-}
+      AWS_SQS_ENDPOINT_URL: ${AWS_SQS_ENDPOINT_URL:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+    volumes: ["cloudpulse-data:/data"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 10s
+    restart: unless-stopped
+    networks: [cloudpulse]
+
+  cloudpulse-worker:
+    build: ./backend
+    container_name: cloudpulse-worker
+    command: ["python", "-m", "app.worker_service"]
+    environment:
+      CLOUDPULSE_DB: /data/cloudpulse.db
+      CLOUDPULSE_ROLE: worker
+      WORKER_POOL_LIMIT: 16
+      CLOUDPULSE_QUEUE_BACKEND: ${CLOUDPULSE_QUEUE_BACKEND:-sqlite}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+      AWS_SQS_QUEUE_URL: ${AWS_SQS_QUEUE_URL:-}
+      AWS_SQS_DLQ_URL: ${AWS_SQS_DLQ_URL:-}
+      AWS_SQS_ENDPOINT_URL: ${AWS_SQS_ENDPOINT_URL:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+    volumes: ["cloudpulse-data:/data"]
+    depends_on:
+      cloudpulse-api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [cloudpulse]
+
+  cloudpulse-simulator:
+    build: ./backend
+    container_name: cloudpulse-simulator
+    command: ["python", "-m", "app.simulator_service"]
+    environment:
+      CLOUDPULSE_INTERNAL_API: http://cloudpulse-api:8000
+      SIMULATOR_INTERVAL_SECONDS: 1
+    depends_on:
+      cloudpulse-api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [cloudpulse]
+
+  cloudpulse-web:
+    build: .
+    container_name: cloudpulse-web
+    ports: ["3000:3000"]
+    environment:
+      NEXT_PUBLIC_CLOUDPULSE_API: http://localhost:8000
+    depends_on:
+      cloudpulse-api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [cloudpulse]
+
+volumes:
+  cloudpulse-data:
+networks:
+  cloudpulse:
+    driver: bridge
